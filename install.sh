@@ -28,7 +28,7 @@ if [ ! -f "$CFG" ]; then
     read -rsp "Paste GLM API key (Enter to skip): " KEY < /dev/tty || true; echo
     [ -z "$KEY" ] && KEY="PASTE_YOUR_GLM_KEY_HERE"
     ( umask 077; cat > "$CFG" <<EOF
-{"api_key":"$KEY","model":"glm-5.2","max_turns":50,"workspace":"","allowed_tools":["Read","Write","Edit","Glob","Grep"],"denylist":[],"base_url":"$BASE_URL","thinking":true,"reasoning_effort":"max"}
+{"api_key":"$KEY","model":"glm-5.2","max_turns":50,"workspace":"","allowed_tools":["Read","Write","Edit","Glob","Grep"],"denylist":[".git"],"base_url":"$BASE_URL","thinking":true,"reasoning_effort":"max"}
 EOF
 )
     echo "wrote $CFG (base_url=$BASE_URL)"
@@ -39,6 +39,9 @@ if command -v claude >/dev/null 2>&1; then
 else
     echo "claude CLI not found; register manually: claude mcp add glm -- $CLI"
 fi
+# Remove any previous deploy first: cp -r onto an existing directory nests the
+# source inside it (glm-worker/glm-worker) instead of replacing it.
+rm -rf "$SKILL_DST"
 mkdir -p "$(dirname "$SKILL_DST")"
 cp -rf "$PROJ/skills/glm-worker" "$SKILL_DST"
 echo "Done. Restart Claude Code to load the new MCP server."

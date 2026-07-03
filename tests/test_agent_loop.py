@@ -2,7 +2,14 @@ import json
 import types
 from pathlib import Path
 
+import httpx
+import pytest
+from openai import APIConnectionError
+
+import glm_worker_mcp.agent_loop as agent_loop_mod
 from glm_worker_mcp.agent_loop import (
+    AgentLoopError,
+    API_RETRY_ATTEMPTS,
     _parse_sections,
     _redact_args_for_log,
     run_agent,
@@ -28,12 +35,36 @@ def test_parse_sections_absent():
 
 def test_parse_sections_strips_sections_from_body():
     # Sections are rendered as their own manifest blocks; leaving them in the
-    # body duplicated them in the formatted result.
-    text = "Did the thing.\nASSUMPTIONS:\n- keys are nested\n\nTrailer."
+    # body duplicated them in the formatted result. Blank lines between the
+    # trailing sections are tolerated.
+    text = "Did the thing.\nASSUMPTIONS:\n- keys are nested\n\nCOULD NOT DO:\n- legacy.js: enc\n"
     assumptions, couldnt, body = _parse_sections(text)
     assert assumptions == ["keys are nested"]
-    assert couldnt == []
-    assert body == "Did the thing.\nTrailer."
+    assert couldnt == ["legacy.js: enc"]
+    assert body == "Did the thing."
+
+
+def test_parse_sections_midtext_label_stays_in_body():
+    # A section label is only a section when it starts the trailing list block.
+    # Mid-prose sentences that happen to start with "Could not do:" must not
+    # swallow the rest of the message.
+    text = (
+        "Summary.\n"
+        "Could not do: parse the legacy file today.\n"
+        "It needs manual review before anything else.\n"
+        "Done."
+    )
+    assumptions, couldnt, body = _parse_sections(text)
+    assert assumptions == [] and couldnt == []
+    assert body == text
+
+
+def test_parse_sections_numeric_item_not_mangled():
+    # Leading digits are list markers only when followed by "." or ")" —
+    # "3 files" is content, not numbering.
+    text = "Done.\nASSUMPTIONS:\n- 3 files were already translated\n"
+    assumptions, _, _ = _parse_sections(text)
+    assert assumptions == ["3 files were already translated"]
 
 
 def test_final_message_excludes_parsed_sections(tmp_path):
@@ -49,10 +80,13 @@ def test_final_message_excludes_parsed_sections(tmp_path):
 
 
 def test_redact_sensitive():
-    out = _redact_args_for_log({"path": "a", "content": "x" * 200, "new_string": "y"})
+    out = _redact_args_for_log(
+        {"path": "a", "content": "x" * 200, "new_string": "y", "old_string": "z"}
+    )
     assert out["path"] == "a"
     assert "redacted" in out["content"]
     assert "redacted" in out["new_string"]
+    assert "redacted" in out["old_string"]  # file content leaks via old_string too
 
 
 # ---- run_agent integration with a fake OpenAI-compatible client ----
@@ -167,6 +201,45 @@ def test_thinking_defaults_from_config(tmp_path):
     run_agent("x", cfg, client=client)
     kw = client.completions.calls[0]
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+
+
+def test_reasoning_content_not_resent(tmp_path):
+    # z.ai returns CoT as message.reasoning_content; re-sending it every turn
+    # inflates prompt tokens for no benefit. It must be stripped before the
+    # assistant message is appended back to the conversation.
+    tc = _FakeToolCall("c1", "Read", json.dumps({"path": "missing.txt"}))
+    responses = [
+        _FakeResponse(
+            _FakeMessage(content=None, tool_calls=[tc]),
+            {"role": "assistant", "reasoning_content": "chain of thought here",
+             "tool_calls": [{"id": "c1", "type": "function",
+              "function": {"name": "Read", "arguments": json.dumps({"path": "missing.txt"})}}]},
+        ),
+        _done_response(),
+    ]
+    client = _FakeClient(responses)
+    run_agent("x", _cfg(tmp_path), client=client)
+    second_call_messages = client.completions.calls[1]["messages"]
+    assert all("reasoning_content" not in m for m in second_call_messages)
+
+
+def test_retry_sleeps_only_between_attempts(tmp_path, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(agent_loop_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    class _Boom:
+        def __init__(self):
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=self._create)
+            )
+
+        def _create(self, **kwargs):
+            raise APIConnectionError(request=httpx.Request("POST", "http://x"))
+
+    with pytest.raises(AgentLoopError):
+        run_agent("x", _cfg(tmp_path), client=_Boom())
+    # A sleep after the final failed attempt delays the error for nothing.
+    assert len(sleeps) == API_RETRY_ATTEMPTS
 
 
 def test_run_agent_hits_max_turns(tmp_path):

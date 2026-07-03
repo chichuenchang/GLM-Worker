@@ -16,6 +16,9 @@ if sys.platform == "win32":
         warnings.simplefilter("ignore", DeprecationWarning)
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+from functools import partial
+
+import anyio
 from mcp.server.fastmcp import FastMCP
 
 from . import __version__
@@ -109,7 +112,7 @@ def glm_set_mode(mode: str) -> str:
 
 
 @mcp.tool()
-def delegate_to_glm(
+async def delegate_to_glm(
     task: str, context: str = "", model: str = "", workspace: str = "",
     thinking: str = "", reasoning_effort: str = "",
 ) -> str:
@@ -173,9 +176,14 @@ def delegate_to_glm(
         think_override if think_override is not None else config.thinking,
     )
     try:
-        result = run_agent(
-            full_task, config, model=model or None, workspace=ws_override,
-            thinking=think_override, reasoning_effort=effort_override,
+        # run_agent blocks (HTTP calls, retry sleeps) — offload it so the
+        # event loop keeps serving ping/set_mode and MCP cancellations.
+        result = await anyio.to_thread.run_sync(
+            partial(
+                run_agent, full_task, config, model=model or None,
+                workspace=ws_override, thinking=think_override,
+                reasoning_effort=effort_override,
+            )
         )
     except AgentLoopError as e:
         logger.exception("agent loop failed")

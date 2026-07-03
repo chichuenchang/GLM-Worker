@@ -10,6 +10,9 @@ CONFIG_PATH = Path.home() / ".glm-mcp" / "config.json"
 DEFAULT_MODEL = "glm-5.2"
 DEFAULT_MAX_TURNS = 50
 FILES_ONLY_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"]
+# The sandbox's job is catching the worker doing something dumb; a writable
+# .git (hooks, config) would defeat it. Explicit "denylist": [] opts out.
+DEFAULT_DENYLIST = [".git"]
 DEFAULT_BASE_URL = "https://api.z.ai/api/paas/v4"
 DEFAULT_THINKING = True
 DEFAULT_REASONING_EFFORT = "max"
@@ -26,7 +29,7 @@ class Config:
     model: str = DEFAULT_MODEL
     max_turns: int = DEFAULT_MAX_TURNS
     allowed_tools: list = field(default_factory=lambda: list(FILES_ONLY_TOOLS))
-    denylist: list = field(default_factory=list)
+    denylist: list = field(default_factory=lambda: list(DEFAULT_DENYLIST))
     base_url: str = DEFAULT_BASE_URL
     thinking: bool = DEFAULT_THINKING
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
@@ -84,9 +87,9 @@ class Config:
         if not allowed:
             allowed = list(FILES_ONLY_TOOLS)
 
-        denylist = data.get("denylist", [])
+        denylist = data.get("denylist", list(DEFAULT_DENYLIST))
         if not isinstance(denylist, list) or not all(isinstance(d, str) for d in denylist):
-            denylist = []
+            denylist = list(DEFAULT_DENYLIST)
 
         thinking = bool(data.get("thinking", DEFAULT_THINKING))
 

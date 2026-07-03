@@ -116,6 +116,20 @@ def test_deepseek_style_effort_rejected(tmp_path):
     assert Config.load(config_path=p).reasoning_effort == "max"
 
 
+def test_default_denylist_includes_git(tmp_path, monkeypatch):
+    # The worker must not be able to rewrite .git internals (hooks, config)
+    # unless the user explicitly opts in.
+    monkeypatch.chdir(tmp_path)
+    p = write_cfg(tmp_path, {"api_key": "sk-x"})
+    assert Config.load(config_path=p).denylist == [".git"]
+
+
+def test_explicit_empty_denylist_respected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    p = write_cfg(tmp_path, {"api_key": "sk-x", "denylist": []})
+    assert Config.load(config_path=p).denylist == []
+
+
 def test_workspace_missing_falls_back_to_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     p = write_cfg(tmp_path, {"api_key": "sk-x", "workspace": str(tmp_path / "nope")})

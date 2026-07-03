@@ -1,6 +1,9 @@
-﻿import pytest
+﻿import sys
+
+import pytest
 from pathlib import Path
 
+import glm_worker_mcp.tools as tools_mod
 from glm_worker_mcp.tools import ChangeTracker, execute_tool
 
 
@@ -83,6 +86,71 @@ def test_write_then_edit_stays_written_with_line_count(tmp_path):
     # created this run -> reported as written, count is the write's line count (3), not edit occurrences (1)
     assert tracker.manifest() == [{"path": "f.txt", "action": "written", "count": 3}]
     assert (tmp_path / "f.txt").read_text() == "l0\nX\nl2\n"
+
+
+def test_edit_twice_accumulates_edit_count(tmp_path):
+    (tmp_path / "f.txt").write_text("foo bar foo baz", encoding="utf-8")
+    tracker = ChangeTracker()
+    execute_tool("Edit", {"path": "f.txt", "old_string": "foo", "new_string": "qux",
+                          "replace_all": True}, tmp_path, [], tracker)
+    execute_tool("Edit", {"path": "f.txt", "old_string": "bar", "new_string": "quux"},
+                 tmp_path, [], tracker)
+    # 2 occurrences in the first call + 1 in the second: counts accumulate.
+    assert tracker.manifest() == [{"path": "f.txt", "action": "edited", "count": 3}]
+
+
+def test_read_oversize_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_mod, "MAX_READ_BYTES", 10)
+    (tmp_path / "f.txt").write_text("0123456789ABCDEF", encoding="utf-8")
+    out, _ = run("Read", {"path": "f.txt"}, tmp_path)
+    assert out.startswith("ERROR") and "too large" in out
+
+
+def test_edit_oversize_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_mod, "MAX_READ_BYTES", 10)
+    (tmp_path / "f.txt").write_text("0123456789ABCDEF", encoding="utf-8")
+    out, _ = run("Edit", {"path": "f.txt", "old_string": "ABC", "new_string": "x"}, tmp_path)
+    assert out.startswith("ERROR") and "too large" in out
+
+
+def test_grep_skips_oversize_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_mod, "MAX_READ_BYTES", 10)
+    (tmp_path / "big.txt").write_text("needle needle needle", encoding="utf-8")
+    (tmp_path / "ok.txt").write_text("needle", encoding="utf-8")
+    out, _ = run("Grep", {"pattern": "needle"}, tmp_path)
+    assert "ok.txt" in out and "big.txt" not in out
+
+
+def test_grep_respects_denylist(tmp_path):
+    (tmp_path / "secrets.txt").write_text("TOKEN=abc", encoding="utf-8")
+    (tmp_path / "app.py").write_text("TOKEN=def", encoding="utf-8")
+    out, _ = run("Grep", {"pattern": "TOKEN"}, tmp_path, denylist=["secrets.txt"])
+    assert "app.py" in out and "secrets.txt" not in out
+
+
+def test_glob_respects_denylist(tmp_path):
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "v.py").write_text("x")
+    (tmp_path / "a.py").write_text("x")
+    out, _ = run("Glob", {"pattern": "**/*.py"}, tmp_path, denylist=["vendor"])
+    assert "a.py" in out and "v.py" not in out
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="glob include_hidden needs 3.11+")
+def test_glob_finds_hidden_files(tmp_path):
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "ci.yml").write_text("x")
+    out, _ = run("Glob", {"pattern": "**/*.yml"}, tmp_path)
+    assert "ci.yml" in out
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="glob include_hidden needs 3.11+")
+def test_grep_searches_hidden_files_but_not_denylisted(tmp_path):
+    (tmp_path / ".env").write_text("TOKEN=abc", encoding="utf-8")
+    out, _ = run("Grep", {"pattern": "TOKEN"}, tmp_path)
+    assert ".env" in out
+    out2, _ = run("Grep", {"pattern": "TOKEN"}, tmp_path, denylist=[".env"])
+    assert "No matches" in out2
 
 
 def test_glob_matches(tmp_path):

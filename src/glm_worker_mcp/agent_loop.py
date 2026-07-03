@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -14,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 API_RETRY_ATTEMPTS = 2
 API_RETRY_BACKOFF_SECONDS = 2.0
-SENSITIVE_TOOL_ARG_KEYS = {"content", "new_string"}
+# old_string carries file content just like content/new_string — redact all three.
+SENSITIVE_TOOL_ARG_KEYS = {"content", "new_string", "old_string"}
 
 SYSTEM_PROMPT_TEMPLATE = """You are GLM working as a sub-agent for Claude.
 
@@ -40,41 +42,59 @@ class AgentLoopError(Exception):
     """Agent loop failed (unrecoverable API error)."""
 
 
+# A list marker is "-", "*", or "1." / "1)" — bare digits are content.
+_ITEM_MARKER_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s*")
+
+
+def _section_for(line: str) -> str | None:
+    low = line.strip().lower()
+    if low.startswith("assumptions:"):
+        return "assumptions"
+    if low.startswith(("could not do:", "couldn't do:", "couldnt do:")):
+        return "couldnt"
+    return None
+
+
 def _parse_sections(text: str):
     """Split the worker's final text into (assumptions, couldnt, body).
 
-    body is the text with the labeled sections removed — they are rendered as
-    separate manifest blocks, so leaving them in would duplicate them.
+    The labeled sections are only recognized as a trailing block (headers,
+    list items, and blank lines at the end of the message) — a mid-prose
+    sentence that happens to start with "Could not do:" stays in the body.
+    body is the text with the recognized sections removed; they are rendered
+    as separate manifest blocks, so leaving them in would duplicate them.
     """
+    lines = text.splitlines()
+    first_header = None
+    for idx in range(len(lines) - 1, -1, -1):
+        s = lines[idx].strip()
+        if not s:
+            continue
+        if _section_for(lines[idx]):
+            first_header = idx
+            continue
+        if _ITEM_MARKER_RE.match(lines[idx]):
+            continue
+        break  # prose above (or below) the trailing block ends the scan
+    if first_header is None:
+        return [], [], text.strip()
+
     assumptions: list[str] = []
     couldnt: list[str] = []
-    body_lines: list[str] = []
     current = None
-    for line in text.splitlines():
-        s = line.strip()
-        low = s.lower()
-        if low.startswith("assumptions:"):
-            current = assumptions
-            rest = s.split(":", 1)[1].strip()
+    for line in lines[first_header:]:
+        section = _section_for(line)
+        if section:
+            current = assumptions if section == "assumptions" else couldnt
+            rest = line.strip().split(":", 1)[1].strip()
             if rest:
                 current.append(rest)
             continue
-        if low.startswith(("could not do:", "couldn't do:", "couldnt do:")):
-            current = couldnt
-            rest = s.split(":", 1)[1].strip()
-            if rest:
-                current.append(rest)
-            continue
-        if current is not None:
-            if not s:
-                current = None
-                continue
-            item = s.lstrip("-*0123456789. ").strip()
-            if item:
-                current.append(item)
-            continue
-        body_lines.append(line)
-    return assumptions, couldnt, "\n".join(body_lines).strip()
+        item = _ITEM_MARKER_RE.sub("", line, count=1).strip()
+        if item and current is not None:
+            current.append(item)
+    body = "\n".join(lines[:first_header]).strip()
+    return assumptions, couldnt, body
 
 
 def _redact_args_for_log(args: dict) -> dict:
@@ -132,7 +152,11 @@ def run_agent(task, config, model=None, workspace=None, client=None,
             total_completion += usage.completion_tokens
         msg = response.choices[0].message
         raw = response.model_dump(exclude_none=True)
-        messages.append(raw["choices"][0]["message"])
+        assistant_msg = raw["choices"][0]["message"]
+        # CoT (message.reasoning_content) is stateless: re-sending it every
+        # turn only inflates prompt tokens, so strip it before appending.
+        assistant_msg.pop("reasoning_content", None)
+        messages.append(assistant_msg)
 
         if not msg.tool_calls:
             final = msg.content or "(empty response)"
@@ -183,9 +207,7 @@ def _call_with_retry(client, model, messages, tools, turn,
     }
     # GLM-5.2 is a hybrid reasoning model whose server-side default is thinking ON,
     # so both states are sent explicitly. z.ai's documented shape carries
-    # reasoning_effort inside extra_body ("high" | "max"). CoT comes back as
-    # message.reasoning_content, which the loop round-trips by re-appending the
-    # full assistant message each turn.
+    # reasoning_effort inside extra_body ("high" | "max").
     if thinking:
         kwargs["extra_body"] = {
             "thinking": {"type": "enabled"},
@@ -199,16 +221,15 @@ def _call_with_retry(client, model, messages, tools, turn,
             return client.chat.completions.create(**kwargs)
         except (APIConnectionError, RateLimitError) as e:
             last_exc = e
-            time.sleep(API_RETRY_BACKOFF_SECONDS * (attempt + 1))
         except APIError as e:
             status = getattr(e, "status_code", None)
-            if status and 500 <= status < 600:
-                last_exc = e
-                time.sleep(API_RETRY_BACKOFF_SECONDS * (attempt + 1))
-                continue
-            raise AgentLoopError(f"GLM API error on turn {turn}: {e}") from e
+            if not (status and 500 <= status < 600):
+                raise AgentLoopError(f"GLM API error on turn {turn}: {e}") from e
+            last_exc = e
         except Exception as e:
             raise AgentLoopError(f"GLM API error on turn {turn}: {e}") from e
+        if attempt < API_RETRY_ATTEMPTS:  # no pointless sleep after the last try
+            time.sleep(API_RETRY_BACKOFF_SECONDS * (attempt + 1))
     raise AgentLoopError(
         f"GLM API unreachable after {1 + API_RETRY_ATTEMPTS} attempts on turn {turn}: {last_exc}"
     ) from last_exc

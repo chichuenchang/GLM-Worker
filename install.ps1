@@ -33,7 +33,7 @@ if (-not (Test-Path $cfg)) {
     $key = Read-Host "Paste GLM API key (Enter to skip)"
     if (-not $key) { $key = "PASTE_YOUR_GLM_KEY_HERE" }
     $json = @{ api_key = $key; model = "glm-5.2"; max_turns = 50; workspace = "";
-       allowed_tools = @("Read", "Write", "Edit", "Glob", "Grep"); denylist = @();
+       allowed_tools = @("Read", "Write", "Edit", "Glob", "Grep"); denylist = @(".git");
        base_url = $baseUrl; thinking = $true; reasoning_effort = "max" } |
         ConvertTo-Json
     # Not Set-Content -Encoding utf8: Windows PowerShell 5.1 would prepend a BOM.
@@ -49,6 +49,9 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     Write-Host "claude CLI not found; register manually: claude mcp add glm -- $cli"
 }
 
+# Remove any previous deploy first: copying onto an existing directory would
+# nest the source inside it (glm-worker\glm-worker) instead of replacing it.
+if (Test-Path $skillsDir) { Remove-Item -Recurse -Force $skillsDir }
 New-Item -ItemType Directory -Force -Path (Split-Path $skillsDir) | Out-Null
 Copy-Item -Recurse -Force (Join-Path $proj "skills\glm-worker") $skillsDir
 Write-Host "deployed skill to $skillsDir"

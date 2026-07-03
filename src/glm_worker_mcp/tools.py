@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import glob as _glob
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .safety import SandboxViolation, resolve_safe_path
+from .safety import SandboxViolation, _denied, resolve_safe_path
 
 MAX_TOOL_OUTPUT = 50_000
 MAX_WRITE_BYTES = 5_000_000
+MAX_READ_BYTES = 10_000_000
+# glob() ignores dot-entries by default; include_hidden only exists on 3.11+.
+# On 3.10 hidden files stay invisible to Glob/Grep (Read/Write on explicit
+# dot-paths still work).
+_GLOB_KWARGS = {"include_hidden": True} if sys.version_info >= (3, 11) else {}
 
 
 @dataclass
@@ -22,6 +28,9 @@ class ChangeTracker:
             # count; a later edit keeps it labelled "written" with that count.
             if action == "written":
                 existing["count"] = count
+            return
+        if existing and existing["action"] == "edited" and action == "edited":
+            existing["count"] += count
             return
         self.changes[path] = {"action": action, "count": count}
 
@@ -51,13 +60,18 @@ def _line_count(text: str) -> int:
     return text.count("\n") + (0 if text.endswith("\n") else 1)
 
 
-def _safe_match(path_str: str, ws_resolved: Path) -> Path | None:
+def _safe_match(
+    path_str: str, ws_resolved: Path, denylist: list | None = None
+) -> Path | None:
+    """Confine a glob match to the workspace and the denylist; None = filtered."""
     try:
         p = Path(path_str).resolve()
-        p.relative_to(ws_resolved)
-        return p
+        rel = p.relative_to(ws_resolved)
     except (ValueError, OSError):
         return None
+    if denylist and _denied(rel.as_posix(), denylist):
+        return None
+    return p
 
 
 def _execute_read(args, workspace, denylist, tracker):
@@ -75,6 +89,9 @@ def _execute_read(args, workspace, denylist, tracker):
     if _is_binary(abs_path):
         return f"ERROR: {path} appears to be binary; refusing to read as text."
     try:
+        size = abs_path.stat().st_size
+        if size > MAX_READ_BYTES:
+            return f"ERROR: {path} is too large to read ({size} bytes; cap {MAX_READ_BYTES})."
         text = abs_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
         return f"ERROR: failed to read {path}: {e}"
@@ -125,6 +142,9 @@ def _execute_edit(args, workspace, denylist, tracker):
     if _is_binary(abs_path):
         return f"ERROR: {path} appears to be binary; refusing to edit as text."
     try:
+        size = abs_path.stat().st_size
+        if size > MAX_READ_BYTES:
+            return f"ERROR: {path} is too large to edit ({size} bytes; cap {MAX_READ_BYTES})."
         text = abs_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
         return f"ERROR: failed to read {path}: {e}"
@@ -156,10 +176,10 @@ def _execute_glob(args, workspace, denylist, tracker):
     except SandboxViolation as e:
         return f"ERROR: {e}"
     ws_resolved = workspace.resolve()
-    raw = sorted(_glob.glob(str(base_path / pattern), recursive=True))
+    raw = sorted(_glob.glob(str(base_path / pattern), recursive=True, **_GLOB_KWARGS))
     safe, rejected = [], 0
     for m in raw:
-        p = _safe_match(m, ws_resolved)
+        p = _safe_match(m, ws_resolved, denylist)
         if p is None:
             rejected += 1
             continue
@@ -174,7 +194,7 @@ def _execute_glob(args, workspace, denylist, tracker):
     if len(safe) > 500:
         summary += " (showing first 500)"
     if rejected:
-        summary += f" [{rejected} hidden: outside workspace]"
+        summary += f" [{rejected} hidden: outside workspace or denylisted]"
     return summary + ":\n" + "\n".join(rel)
 
 
@@ -198,19 +218,18 @@ def _execute_grep(args, workspace, denylist, tracker):
         return f"ERROR: invalid regex: {e}"
     ws_resolved = workspace.resolve()
     results = []
-    for fp in _glob.iglob(str(base_path / file_glob), recursive=True):
-        p = _safe_match(fp, ws_resolved)
+    for fp in _glob.iglob(str(base_path / file_glob), recursive=True, **_GLOB_KWARGS):
+        p = _safe_match(fp, ws_resolved, denylist)
         if p is None or not p.is_file() or _is_binary(p):
             continue
         try:
+            if p.stat().st_size > MAX_READ_BYTES:
+                continue
+            rel = p.relative_to(ws_resolved)
             for lineno, line in enumerate(
                 p.read_text(encoding="utf-8", errors="replace").splitlines(), 1
             ):
                 if regex.search(line):
-                    try:
-                        rel = p.relative_to(ws_resolved)
-                    except ValueError:
-                        rel = p
                     results.append(f"{rel}:{lineno}: {line}")
                     if len(results) >= max_matches:
                         break
