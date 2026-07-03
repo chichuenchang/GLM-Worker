@@ -62,7 +62,8 @@ transmitted to `api.z.ai`.
 
 ## 4. Testing
 
-Full suite ported (56 tests: 54 offline + skip-gated live smoke + skip-gated symlink
+Full suite ported (59 tests: 57 offline + skip-gated live smoke + skip-gated symlink
 case on Windows). New/changed coverage: ZAI fallback + GLM_API_KEY precedence,
 effort validation rejects DeepSeek-style `low`/`medium`, explicit
-`{"thinking": {"type": "disabled"}}` when off, `reasoning_effort` inside `extra_body`.
+`{"thinking": {"type": "disabled"}}` when off, `reasoning_effort` inside `extra_body`,
+BOM-tolerant config read (0.1.1).
