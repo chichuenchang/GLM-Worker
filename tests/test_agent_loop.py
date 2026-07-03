@@ -16,13 +16,36 @@ def test_parse_sections():
         "ASSUMPTIONS:\n- keys are nested\n- utf8 only\n"
         "COULD NOT DO:\n- legacy.js: bad encoding\n"
     )
-    assumptions, couldnt = _parse_sections(text)
+    assumptions, couldnt, body = _parse_sections(text)
     assert assumptions == ["keys are nested", "utf8 only"]
     assert couldnt == ["legacy.js: bad encoding"]
+    assert body == "Did the thing."
 
 
 def test_parse_sections_absent():
-    assert _parse_sections("just a summary") == ([], [])
+    assert _parse_sections("just a summary") == ([], [], "just a summary")
+
+
+def test_parse_sections_strips_sections_from_body():
+    # Sections are rendered as their own manifest blocks; leaving them in the
+    # body duplicated them in the formatted result.
+    text = "Did the thing.\nASSUMPTIONS:\n- keys are nested\n\nTrailer."
+    assumptions, couldnt, body = _parse_sections(text)
+    assert assumptions == ["keys are nested"]
+    assert couldnt == []
+    assert body == "Did the thing.\nTrailer."
+
+
+def test_final_message_excludes_parsed_sections(tmp_path):
+    responses = [
+        _FakeResponse(
+            _FakeMessage(content="Done.\nASSUMPTIONS:\n- none\n", tool_calls=None),
+            {"role": "assistant", "content": "Done.\nASSUMPTIONS:\n- none\n"},
+        ),
+    ]
+    result = run_agent("x", _cfg(tmp_path), client=_FakeClient(responses))
+    assert result["final_message"] == "Done."
+    assert result["assumptions"] == ["none"]
 
 
 def test_redact_sensitive():

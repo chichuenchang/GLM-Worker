@@ -41,8 +41,14 @@ class AgentLoopError(Exception):
 
 
 def _parse_sections(text: str):
+    """Split the worker's final text into (assumptions, couldnt, body).
+
+    body is the text with the labeled sections removed — they are rendered as
+    separate manifest blocks, so leaving them in would duplicate them.
+    """
     assumptions: list[str] = []
     couldnt: list[str] = []
+    body_lines: list[str] = []
     current = None
     for line in text.splitlines():
         s = line.strip()
@@ -66,7 +72,9 @@ def _parse_sections(text: str):
             item = s.lstrip("-*0123456789. ").strip()
             if item:
                 current.append(item)
-    return assumptions, couldnt
+            continue
+        body_lines.append(line)
+    return assumptions, couldnt, "\n".join(body_lines).strip()
 
 
 def _redact_args_for_log(args: dict) -> dict:
@@ -128,9 +136,9 @@ def run_agent(task, config, model=None, workspace=None, client=None,
 
         if not msg.tool_calls:
             final = msg.content or "(empty response)"
-            assumptions, couldnt = _parse_sections(final)
+            assumptions, couldnt, body = _parse_sections(final)
             return {
-                "final_message": final,
+                "final_message": body or "(no summary)",
                 "files_changed": tracker.manifest(),
                 "assumptions": assumptions,
                 "couldnt_do": couldnt,
@@ -157,9 +165,9 @@ def run_agent(task, config, model=None, workspace=None, client=None,
         if m.get("role") == "assistant" and m.get("content"):
             last_text = str(m["content"])
             break
-    assumptions, couldnt = _parse_sections(last_text)
+    assumptions, couldnt, body = _parse_sections(last_text)
     return {
-        "final_message": f"[stopped: hit max_turns={config.max_turns}] " + (last_text or "(no final text)"),
+        "final_message": f"[stopped: hit max_turns={config.max_turns}] " + (body or "(no final text)"),
         "files_changed": tracker.manifest(),
         "assumptions": assumptions,
         "couldnt_do": couldnt,

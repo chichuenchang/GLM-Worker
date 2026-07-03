@@ -7,6 +7,9 @@
   report `NOT_CONFIGURED (Invalid JSON ...)` after hand-editing the config.
 - `install.ps1` writes the config template without a BOM (was the repo's own
   BOM source on Windows PowerShell 5.1).
+- Manifest no longer duplicates the worker's `ASSUMPTIONS:` / `COULD NOT DO:`
+  text: the parsed sections are stripped from `final_message` and rendered only
+  as their `--- assumptions ---` / `--- could not do ---` blocks.
 
 ## 0.1.0 — 2026-07-03
 
