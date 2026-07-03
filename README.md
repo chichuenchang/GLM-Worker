@@ -77,6 +77,52 @@ Per-call overrides: `delegate_to_glm(task, context, model="glm-5.2[1m]", workspa
 - **Hard, on the fly (no restart):** ask Claude to *"turn glm off"* / *"on"* — it calls the `glm_set_mode` tool (`on` / `off` / `auto`). Session-scoped: the override lasts until changed again or the server restarts, then reverts to the launch default. `ping` shows the effective mode.
 - **At launch:** start Claude with `GLM_MODE=off` to default the session off.
 
+### Optional: auto-route subagent work to GLM
+
+The skill covers delegation Claude does inline. To make Claude also route qualifying
+*subagent* stages (Agent tool spawns, Workflow fan-outs) to the `glm` proxy automatically —
+no per-task ask — paste this into your global `~/.claude/CLAUDE.md` (or a project
+`CLAUDE.md` to scope it to one repo):
+
+```markdown
+## Subagent/Workflow → GLM routing
+
+When spawning a subagent for a mechanical/bulk stage, you MAY route it to the GLM-5.2
+proxy subagent instead of a default Claude subagent — via either spawn path:
+
+    Agent tool:  subagent_type: 'glm'                # mechanical/bulk -> GLM
+    Workflow:    agent(prompt, {agentType: 'glm'})   # mechanical/bulk -> GLM
+    Workflow:    agent(prompt, {schema: VERDICT})    # verify/judge/reason -> Claude (default)
+
+**Route to the `glm` agent ONLY when ALL of these hold:** bounded, files-only
+(needs only Read/Write/Edit/Glob/Grep), high-volume, mechanical / low-variance (the
+transformation is rule-shaped, not open-ended), AND it has a cheap Claude-side
+verification gate. Examples: bulk extraction, mechanical translation via a provided
+glossary/mapping (NOT free/idiomatic translation, which is reasoning), pattern refactors
+across many files, codegen from a template, file-output ETL.
+
+**Files-only does NOT mean reasoning-free.** If the per-item work needs judgment,
+classification, disambiguation, or design decisions, keep it on Claude even if it only
+touches files. Always keep on the default Claude subagent: verification, judging,
+synthesis, planning, and anything needing shell, web, code execution, or non-trivial
+reasoning.
+
+**Fail closed.** The `glm` agent is a normal Claude proxy that still spawns even
+when glm-mcp is disconnected or delegation mode is OFF — in those cases its
+`delegate_to_glm` call returns an `ERROR:` / "GLM delegation is OFF" string
+(it does not throw) and the proxy will NOT do the work itself. Therefore:
+
+- Only route to GLM when the worker is actually usable (`mcp__glm__ping` reports
+  `mode=on`; the proxy self-enables an OFF mode once, but a disconnected server cannot
+  recover).
+- EVERY GLM-routed bulk stage MUST be followed by a Claude verify stage that fails
+  closed: treat an error / OFF / empty manifest as a failed stage, never let it propagate
+  downstream.
+```
+
+Not installed automatically: CLAUDE.md is personal config, and blanket auto-routing is a
+policy choice each user should opt into deliberately.
+
 ## Result manifest
 
 Every delegation returns the worker's summary plus:
