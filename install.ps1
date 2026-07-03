@@ -55,4 +55,9 @@ if (Test-Path $skillsDir) { Remove-Item -Recurse -Force $skillsDir }
 New-Item -ItemType Directory -Force -Path (Split-Path $skillsDir) | Out-Null
 Copy-Item -Recurse -Force (Join-Path $proj "skills\glm-worker") $skillsDir
 Write-Host "deployed skill to $skillsDir"
+
+$agentsDir = Join-Path $HOME ".claude\agents"
+New-Item -ItemType Directory -Force -Path $agentsDir | Out-Null
+Copy-Item -Force (Join-Path $proj "agents\glm.md") (Join-Path $agentsDir "glm.md")
+Write-Host "deployed glm agent to $agentsDir\glm.md"
 Write-Host "Done. Restart Claude Code to load the new MCP server."

@@ -32,7 +32,8 @@ default `denylist` lets you refuse secret-pattern paths (e.g. `.env*`, `.git`, `
 **Requires Python 3.10+.** The installer creates a `.venv`, installs the package, writes a config template at
 `~/.glm-mcp/config.json` (asks which platform your key is from — z.ai or bigmodel.cn — and
 prompts for the key), registers the server with Claude Code (`claude mcp add glm -s user`),
-and deploys the `glm-worker` skill. Restart Claude Code afterward to load the new MCP server.
+and deploys the `glm-worker` skill plus the `glm` proxy agent type (`~/.claude/agents/glm.md`,
+used to route subagent fan-outs to the worker). Restart Claude Code afterward to load both.
 
 ## Config — `~/.glm-mcp/config.json`
 

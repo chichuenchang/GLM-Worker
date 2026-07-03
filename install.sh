@@ -44,4 +44,9 @@ fi
 rm -rf "$SKILL_DST"
 mkdir -p "$(dirname "$SKILL_DST")"
 cp -rf "$PROJ/skills/glm-worker" "$SKILL_DST"
+
+AGENT_DST="$HOME/.claude/agents/glm.md"
+mkdir -p "$(dirname "$AGENT_DST")"
+cp -f "$PROJ/agents/glm.md" "$AGENT_DST"
+echo "deployed glm agent to $AGENT_DST"
 echo "Done. Restart Claude Code to load the new MCP server."

@@ -34,7 +34,7 @@ Same worker, two routes — pick by shape:
   pulled), returns the worker's manifest verbatim as its result — you still inspect
   files-changed / assumptions / could-not-do — and keeps per-shard tool traffic out of your
   context. It never edits files itself; on the OFF response it self-enables once, retries
-  once, else reports the error verbatim. The agent type installs separately from this skill
+  once, else reports the error verbatim. The agent type is installed alongside this skill
   (`~/.claude/agents/glm.md`); if absent, inline is the only route.
 
 ## Mode gate
