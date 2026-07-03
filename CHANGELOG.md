@@ -2,7 +2,7 @@
 
 ## 0.1.2 — 2026-07-03
 
-Production-hardening pass: 10 fixes from a full pre-release audit.
+Production-hardening pass: 11 fixes from a full pre-release audit.
 
 - Installers: re-running no longer nests the deployed skill
   (`~/.claude/skills/glm-worker/glm-worker/`) — the previous deploy is removed
