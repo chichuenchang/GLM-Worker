@@ -32,10 +32,12 @@ if (-not (Test-Path $cfg)) {
                else { "https://api.z.ai/api/paas/v4" }
     $key = Read-Host "Paste GLM API key (Enter to skip)"
     if (-not $key) { $key = "PASTE_YOUR_GLM_KEY_HERE" }
-    @{ api_key = $key; model = "glm-5.2"; max_turns = 50; workspace = "";
+    $json = @{ api_key = $key; model = "glm-5.2"; max_turns = 50; workspace = "";
        allowed_tools = @("Read", "Write", "Edit", "Glob", "Grep"); denylist = @();
        base_url = $baseUrl; thinking = $true; reasoning_effort = "max" } |
-        ConvertTo-Json | Set-Content -Encoding utf8 $cfg
+        ConvertTo-Json
+    # Not Set-Content -Encoding utf8: Windows PowerShell 5.1 would prepend a BOM.
+    [System.IO.File]::WriteAllText($cfg, $json, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "wrote $cfg (base_url=$baseUrl)"
 }
 

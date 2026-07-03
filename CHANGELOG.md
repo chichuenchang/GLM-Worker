@@ -5,6 +5,8 @@
 - Read `~/.glm-mcp/config.json` with `utf-8-sig`: tolerate the BOM that Windows
   PowerShell 5.1 `Set-Content -Encoding utf8` prepends, which made the server
   report `NOT_CONFIGURED (Invalid JSON ...)` after hand-editing the config.
+- `install.ps1` writes the config template without a BOM (was the repo's own
+  BOM source on Windows PowerShell 5.1).
 
 ## 0.1.0 — 2026-07-03
 
