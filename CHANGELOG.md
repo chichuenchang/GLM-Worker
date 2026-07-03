@@ -23,6 +23,7 @@ GLM-specific deltas vs the DeepSeek original:
   DeepSeek had four) and is sent inside `extra_body` per z.ai's documented shape.
 - Thinking OFF is sent explicitly as `{"thinking": {"type": "disabled"}}` — GLM's
   server-side default is ON, so omitting the parameter would not disable it.
-- API key env: `GLM_API_KEY`, with `ZAI_API_KEY` accepted as fallback.
+- API key env: `GLM_API_KEY`, with `ZAI_API_KEY` (z.ai) then `ZHIPUAI_API_KEY`
+  (bigmodel.cn) accepted as fallbacks.
 - Tools renamed: `delegate_to_glm`, `glm_set_mode`; config at `~/.glm-mcp/`;
   mode env `GLM_MODE`; skill deployed as `glm-worker`.
