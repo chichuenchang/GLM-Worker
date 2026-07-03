@@ -25,6 +25,24 @@ files, generate boilerplate from a template, file-output ETL.
 
 If verifying would cost as much as doing it, do it yourself.
 
+## Inline call or `glm` proxy agent
+Same worker, two routes — pick by shape:
+- **One delegation, mid-conversation** → call `delegate_to_glm` yourself.
+- **Fan-out (parallel shards, Workflow stages)** → spawn a `glm` proxy subagent per shard:
+  Agent tool `subagent_type: "glm"`, or Workflow `agent(prompt, {agentType: "glm"})`. The
+  proxy forwards your prompt as `task` (thinking off by default — the cost lever is already
+  pulled), returns the worker's manifest verbatim as its result — you still inspect
+  files-changed / assumptions / could-not-do — and keeps per-shard tool traffic out of your
+  context. It never edits files itself; on the OFF response it self-enables once, retries
+  once, else reports the error verbatim. The agent type installs separately from this skill
+  (`~/.claude/agents/glm.md`); if absent, inline is the only route.
+
+## Mode gate
+Before delegating — always before a fan-out — `ping` must report `mode=on` and a configured
+server; don't launch shards into an OFF or disconnected worker. The OFF response names its
+own fix: `glm_set_mode(mode="on")` once, then one retry. `ERROR:` results are failures, not
+toggles — read them, don't blind-retry.
+
 ## How to write the task
 Give the worker, in `task`: the exact goal, success criteria, file paths/globs, and output
 format. Put conventions and related-file pointers in `context`. The worker will not ask you
@@ -47,5 +65,9 @@ summary alone:
 1. Read a sample of the changed files.
 2. Run tests / the build if they exist.
 3. Check the "assumptions" and "could not do" sections for anything wrong.
+
+Fail closed: an `ERROR:` result, an OFF response, or a manifest reporting `files_changed=0`
+on a task that must change files is a FAILED delegation — re-delegate or do that slice
+yourself; never count it done or let it flow downstream.
 
 Only then report success to the user.
