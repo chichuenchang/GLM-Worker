@@ -1,0 +1,22 @@
+[project]
+name = "glm-worker-mcp"
+version = "0.1.0"
+description = "Claude-orchestrator / GLM-5.2-worker MCP (files-only)"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.0.0", "openai>=1.0.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+glm-mcp = "glm_worker_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glm_worker_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
