@@ -1,7 +1,7 @@
 # glm-worker-mcp — Design Spec
 
 **Date:** 2026-07-03
-**Status:** Implemented (v0.1.0)
+**Status:** Implemented (v0.1.2)
 **Author:** Jim Zheng (with Claude)
 
 ## 1. Purpose
@@ -62,8 +62,11 @@ transmitted to `api.z.ai`.
 
 ## 4. Testing
 
-Full suite ported (61 tests: 59 offline + skip-gated live smoke + skip-gated symlink
+Full suite ported (76 tests: 74 offline + skip-gated live smoke + skip-gated symlink
 case on Windows). New/changed coverage: ZAI fallback + GLM_API_KEY precedence,
 effort validation rejects DeepSeek-style `low`/`medium`, explicit
 `{"thinking": {"type": "disabled"}}` when off, `reasoning_effort` inside `extra_body`,
-BOM-tolerant config read (0.1.1), section-stripped `final_message` (0.1.1).
+BOM-tolerant config read (0.1.1), section-stripped `final_message` (0.1.1), and the
+0.1.2 hardening pass (denylist default `[".git"]` + Glob/Grep enforcement, hidden
+files on 3.11+, trailing-block manifest parsing, size caps, edit-count accumulation,
+async delegate).
