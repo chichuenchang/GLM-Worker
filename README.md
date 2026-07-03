@@ -15,8 +15,9 @@ filesystem boundary: there is no write-a-script-then-run-it escape, which is the
 blacklist-based sandboxes leak. Symlinks pointing outside the workspace are filtered.
 
 **Residual risk you accept:** file contents the worker reads are sent to z.ai's API
-(`api.z.ai`). Don't point it at secrets you don't want transmitted. An optional, empty-by-
-default `denylist` lets you refuse secret-pattern paths (e.g. `.env*`, `.git`, `*.pem`).
+(`api.z.ai`). Don't point it at secrets you don't want transmitted. The `denylist`
+(default `[".git"]`) refuses matching paths — extend it with secret patterns
+(e.g. `.env*`, `*.pem`); an explicit `"denylist": []` opts out entirely.
 
 ## Install
 
@@ -44,7 +45,7 @@ used to route subagent fan-outs to the worker). Restart Claude Code afterward to
   "max_turns": 50,
   "workspace": "",
   "allowed_tools": ["Read", "Write", "Edit", "Glob", "Grep"],
-  "denylist": [],
+  "denylist": [".git"],
   "base_url": "https://api.z.ai/api/paas/v4",
   "thinking": true,
   "reasoning_effort": "max"
