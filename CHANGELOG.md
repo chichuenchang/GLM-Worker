@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 — 2026-07-03
+
+- Read `~/.glm-mcp/config.json` with `utf-8-sig`: tolerate the BOM that Windows
+  PowerShell 5.1 `Set-Content -Encoding utf8` prepends, which made the server
+  report `NOT_CONFIGURED (Invalid JSON ...)` after hand-editing the config.
+
 ## 0.1.0 — 2026-07-03
 
 Initial release. Port of `deepseek-worker-mcp` v0.3.0 to a GLM-5.2 (z.ai) backend —
