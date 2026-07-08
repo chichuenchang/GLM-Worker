@@ -139,6 +139,72 @@ when glm-mcp is disconnected or delegation mode is OFF — in those cases its
 Not installed automatically: CLAUDE.md is personal config, and blanket auto-routing is a
 policy choice each user should opt into deliberately.
 
+### Optional: enforce auto-routing with hooks
+
+The CLAUDE.md block above is advisory — Claude may still forget to route an eligible task.
+To make routing *enforced*, add two `PreToolUse` prompt hooks to `~/.claude/settings.json`
+(merge into your existing `hooks` object; not installed automatically for the same reason
+as above). Each hook runs a small LLM classifier before the tool call:
+
+- **`Agent` gate** — every Agent-tool dispatch is classified. A bounded, mechanical,
+  files-only, bulk task on a generic agent type gets denied with an instruction to
+  redispatch as `subagent_type: 'glm'`. Reasoning work (review, audit, verification,
+  planning, anything needing shell/web/tests) and named agent types (Explore, Plan, …)
+  pass through untouched.
+- **`Workflow` gate** — the whole workflow script is inspected before it runs. If a
+  mechanical/bulk `agent()` stage lacks `agentType: 'glm'`, the call is denied with a
+  rewrite checklist (route the stage to glm, shard ≤10 files, incremental output,
+  fail-closed Claude verify stage after every glm stage).
+
+Both gates fail open to Claude (uncertain → allow) and set `continueOnBlock: true`, so a
+denial feeds the reason back to Claude for a redispatch instead of ending the turn.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Workflow",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "You are a routing gate for Workflow scripts. Hook input: $ARGUMENTS\n\nThe input's tool_input.script is a JavaScript workflow that spawns subagents via agent(prompt, opts). Decide if mechanical bulk stages are correctly routed to the GLM worker.\n\nAnswer ok=true (let the workflow run) if ANY of these hold:\n- tool_input has no script field (invoked via scriptPath or name — cannot inspect; allow)\n- The script contains NO mechanical/bulk stage. Mechanical/bulk = bounded, rule-shaped, files-only work: bulk extraction, mechanical translation via a provided glossary/mapping, pattern refactor across many files, codegen from a template, file-output ETL\n- EVERY mechanical/bulk agent() call already passes agentType: 'glm' in its options, AND each such stage is followed by a Claude verify stage (an agent() WITHOUT agentType:'glm', or explicit result-checking code) that treats error/OFF/empty results as failure\n- All agent() calls are reasoning work: verification, judging, synthesis, planning, review, audit, research, debugging, classification, or need shell/web/code execution — these MUST stay on default Claude agents\n- You are uncertain\n\nAnswer ok=false (block so the orchestrator rewrites the script) ONLY if the script clearly contains one or more mechanical/bulk agent() stages that do NOT pass agentType: 'glm'.\n\nIf blocking, your reason MUST be exactly: \"Workflow has GLM-eligible mechanical stages not routed to the worker. Rewrite the script: (1) add agentType: 'glm' to each mechanical/bulk agent() call; (2) shard to ~<=10 files per glm agent; (3) each glm task must create its output file first and update after EACH item; (4) follow every glm stage with a Claude verify stage that fails closed (error/OFF/empty manifest = failed stage, filter it out); (5) keep verify/judge/synthesis stages on default Claude agents; (6) confirm mcp__glm__ping reports mode=on before resubmitting.\"",
+            "continueOnBlock": true,
+            "timeout": 45,
+            "statusMessage": "Checking workflow GLM routing..."
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "You are a routing gate for subagent dispatches. Hook input: $ARGUMENTS\n\nDecide if this Agent dispatch should be re-routed to the GLM bulk worker.\n\nAnswer ok=true (let the dispatch proceed unchanged) if ANY of these hold:\n- tool_input.subagent_type is already \"glm\"\n- tool_input.subagent_type names a specialized agent (Explore, Plan, claude-code-guide, statusline-setup, code-reviewer, anything starting with \"caveman:\" or \"cavecrew\") — i.e. anything other than missing, \"general-purpose\", or \"claude\"\n- The task involves ANY reasoning work: review, audit, bug hunt, consistency check, verification, judging, synthesis, planning, debugging, research, analysis, classification, disambiguation, design decisions, or free/idiomatic translation\n- The task needs shell, web access, code execution, git, or tests\n- The task is open-ended, low-volume, or not rule-shaped\n- You are uncertain\n\nAnswer ok=false (block so the orchestrator redispatches to GLM) ONLY if ALL of these hold:\n- Bounded, mechanical, rule-shaped work with low variance\n- Files-only: needs nothing beyond Read/Write/Edit/Glob/Grep\n- High-volume/bulk: bulk extraction, mechanical translation via a provided glossary/mapping, pattern refactor across many files, codegen from a template, file-output ETL\n- Cheap Claude-side verification of the output is possible\n\nIf blocking, your reason MUST be exactly: \"GLM-eligible mechanical task. Redispatch with subagent_type 'glm'. Before dispatch: confirm mcp__glm__ping reports mode=on; shard to ~<=10 files per dispatch; instruct worker to create output file first and update after EACH item; afterwards run a Claude verify stage that fails closed (error/OFF/empty manifest = failed stage).\"",
+            "continueOnBlock": true,
+            "timeout": 30,
+            "statusMessage": "Checking GLM routing eligibility..."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Notes:
+
+- Requires the `glm` agent type to be deployed (`~/.claude/agents/glm.md` — the installer
+  does this) and the CLAUDE.md routing block above, which supplies the rules the denial
+  messages refer to.
+- The classifier runs on a small fast model per call; cost is negligible next to what a
+  mis-routed bulk stage would burn.
+- Known blind spots: Workflow calls via `scriptPath`/`name` pass uninspected (script text
+  is not in the hook input), and a denial is an instruction, not a rewrite — the
+  orchestrator model performs the redispatch. The CLAUDE.md block still covers both.
+- Claude Code hot-reloads `~/.claude/settings.json` if it existed at session start;
+  otherwise open `/hooks` once or restart to load the gates.
+
 ## Result manifest
 
 Every delegation returns the worker's summary plus:
