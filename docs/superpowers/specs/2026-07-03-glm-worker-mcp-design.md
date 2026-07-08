@@ -6,7 +6,8 @@
 
 ## 1. Purpose
 
-Port of [deepseek-worker-mcp](../../../../deepseek-worker-mcp/docs/superpowers/specs/2026-06-10-deepseek-worker-mcp-design.md)
+Port of deepseek-worker-mcp (sibling local project; its design spec lives at
+`deepseek-worker-mcp/docs/superpowers/specs/2026-06-10-deepseek-worker-mcp-design.md`)
 (v0.3.0) to a **GLM-5.2 (z.ai) backend**. Same spec by construction: Claude orchestrates,
 a files-only GLM worker executes bounded mechanical sub-tasks through one
 `delegate_to_glm` call and returns a structured manifest. That document remains the
@@ -31,7 +32,7 @@ install shape). This spec records only the deltas.
 | Registered server / CLI | `deepseek` / `deepseek-mcp` | `glm` / `glm-mcp` |
 | Skill | `delegate-to-deepseek` | `glm-worker` |
 | Live smoke env | `DEEPSEEK_LIVE=1` | `GLM_LIVE=1` (+ key), thinking off |
-| Package | `deepseek_worker_mcp` 0.3.0 | `glm_worker_mcp` 0.1.0 |
+| Package | `deepseek_worker_mcp` 0.3.0 | `glm_worker_mcp` 0.1.0 at port time (current version in **Status** above) |
 
 Unchanged by design: `safety.py` and `tools.py` are verbatim copies (backend-agnostic);
 `agent_loop.py`/`server.py`/`config.py` differ only by the deltas above; the worker

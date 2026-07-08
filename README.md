@@ -5,7 +5,7 @@ mechanical file work. Claude delegates a sub-task through one tool call; GLM run
 multi-turn loop over a **files-only** tool set and returns a structured, verifiable manifest.
 The point: move bulk token volume to a cheaper model while Claude keeps planning + verification.
 
-Same spec as [deepseek-worker-mcp](../deepseek-worker-mcp) with GLM-5.2 (z.ai) as the backend.
+Same spec as deepseek-worker-mcp (a sibling local project) with GLM-5.2 (z.ai) as the backend.
 
 ## Security model
 
