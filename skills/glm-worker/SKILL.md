@@ -21,9 +21,26 @@ files, generate boilerplate from a template, file-output ETL.
 ## Do NOT delegate
 - Architectural or cross-file judgment, API design.
 - Bug root-cause analysis.
+- **Audits, code reviews, consistency checks, bug hunts, multi-category analysis.** These
+  are judgment work even though they only touch files — "files-only" does not mean
+  "reasoning-free". A project-wide audit once burned the worker's entire 50-turn budget
+  with zero output. This rule has no pressure valve: if Claude subagents are unavailable
+  (session limit, quota), do the review inline or defer it — never route it to GLM as
+  the "only worker left".
 - Anything needing project idioms you cannot put into task/context.
 
 If verifying would cost as much as doing it, do it yourself.
+
+## Size shards to the turn budget
+The worker runs a hard loop cap (`max_turns`, default 50); each read, edit, glob is a
+turn. One over-stuffed delegation dies at the cap with work stranded in context. Shard
+instead:
+- Rule of thumb: a shard should need well under ~40 turns — for per-file transforms,
+  roughly ≤10 files per shard; fewer when files are large or the transform needs
+  several edits per file.
+- Fan shards out in parallel via the `glm` proxy agent; each gets a fresh budget.
+- The server warns the worker when ~10% of turns remain so it flushes partial output,
+  but that is a safety net, not a sizing strategy.
 
 ## Inline call or `glm` proxy agent
 Same worker, two routes — pick by shape:
@@ -47,6 +64,13 @@ toggles — read them, don't blind-retry.
 Give the worker, in `task`: the exact goal, success criteria, file paths/globs, and output
 format. Put conventions and related-file pointers in `context`. The worker will not ask you
 questions — it makes documented assumptions, so be explicit.
+
+**Require incremental output.** When the task produces an output file (report, manifest,
+extraction), the task text MUST say: create the output file first, then append/update it
+after EACH file or item processed. Never write "produce X at the end" — if the worker hits
+the turn cap, an end-of-run write means total loss; incremental writes mean you keep
+everything up to the cap. (The worker's system prompt also enforces this, but the task
+text should name the concrete output path and cadence.)
 
 ## Model
 Default is `glm-5.2`. When the job spans a huge file set that must be held in one worker

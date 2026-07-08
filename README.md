@@ -64,6 +64,9 @@ used to route subagent fan-outs to the worker). Restart Claude Code afterward to
   Set `thinking: false` or pass `thinking="off"` per call to save tokens on purely mechanical
   work. GLM's server-side default is thinking ON, so "off" is sent explicitly as
   `{"thinking": {"type": "disabled"}}`.
+- The worker states its `max_turns` budget in its system prompt, is instructed to write
+  output files incrementally (never one final write), and gets a budget warning injected
+  when ~10% of turns remain so partial results are flushed instead of lost.
 
 ## Usage
 
@@ -107,6 +110,18 @@ classification, disambiguation, or design decisions, keep it on Claude even if i
 touches files. Always keep on the default Claude subagent: verification, judging,
 synthesis, planning, and anything needing shell, web, code execution, or non-trivial
 reasoning.
+
+**Never route audits/reviews/bug-hunts to GLM — no exceptions.** Consistency audits,
+code reviews, open-ended bug hunts, and multi-category analysis are reasoning work.
+"Claude subagents unavailable" (session limit, quota) is NOT a reason to route them to
+GLM anyway. Do the review inline or defer it. The `glm` proxy agent also refuses these
+task shapes on its own.
+
+**Shard + incremental output.** The worker has a hard turn cap (default 50; every
+read/edit/glob is a turn). Size each delegation to need well under ~40 turns (roughly
+≤10 files per shard for per-file transforms) and fan shards out in parallel. Any task
+producing an output file must instruct: create the file first, update after EACH
+file/item — never one final write at the end.
 
 **Fail closed.** The `glm` agent is a normal Claude proxy that still spawns even
 when glm-mcp is disconnected or delegation mode is OFF — in those cases its

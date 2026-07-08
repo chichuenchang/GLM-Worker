@@ -22,20 +22,33 @@ SYSTEM_PROMPT_TEMPLATE = """You are GLM working as a sub-agent for Claude.
 
 You are given a focused task to complete autonomously within a workspace.
 You have local file tools (no shell, no code execution): {tools}
+You have a hard budget of {max_turns} conversation turns; when it runs out the
+loop stops immediately and anything not yet written to a file is lost.
 
 Rules:
 1. Stay strictly within the workspace: {workspace}
 2. Read before editing. Do not guess file contents.
 3. For batch tasks (translate / extract / refactor many files), iterate file-by-file.
-4. Do NOT ask the parent (Claude) questions. Make reasonable assumptions and document them.
-5. If a tool returns "ERROR: ...", read it and decide: retry with fixed input, skip, or stop. Do not loop on the same error.
-6. When finished, reply with a short summary for the parent. End with two OPTIONAL labeled
+4. Write results incrementally: if the task produces an output file (report,
+   manifest, extraction), create it early and update it after EACH file or item
+   you process. Never hold everything back for one final write at the end.
+5. Do NOT ask the parent (Claude) questions. Make reasonable assumptions and document them.
+6. If a tool returns "ERROR: ...", read it and decide: retry with fixed input, skip, or stop. Do not loop on the same error.
+7. When finished, reply with a short summary for the parent. End with two OPTIONAL labeled
    sections, one item per line:
    ASSUMPTIONS:
    - <assumption you made>
    COULD NOT DO:
    - <file or item>: <reason>
 """
+
+# Injected as a user message when this many turns remain, so the worker flushes
+# partial results instead of losing them to the max_turns cutoff.
+TURN_WARNING_FLOOR = 2
+
+
+def _turn_warning_remaining(max_turns: int) -> int:
+    return max(TURN_WARNING_FLOOR, max_turns // 10)
 
 
 class AgentLoopError(Exception):
@@ -119,7 +132,8 @@ def run_agent(task, config, model=None, workspace=None, client=None,
     tools = build_tool_schemas(config.allowed_tools)
     tracker = ChangeTracker()
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        tools=", ".join(config.allowed_tools), workspace=ws
+        tools=", ".join(config.allowed_tools), workspace=ws,
+        max_turns=config.max_turns,
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -141,7 +155,20 @@ def run_agent(task, config, model=None, workspace=None, client=None,
             "duration_seconds": round(time.time() - started, 2),
         }
 
+    warn_at = _turn_warning_remaining(config.max_turns)
     for turn in range(config.max_turns):
+        # turn > 0: a warning on the very first turn (tiny max_turns) would
+        # preempt the task before any work happened.
+        if turn > 0 and config.max_turns - turn == warn_at:
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"[turn budget warning] Only {warn_at} turns remain before the "
+                    "hard cap. Stop processing new items now: write any unsaved "
+                    "results to the output file(s), then reply with your summary "
+                    "(including ASSUMPTIONS / COULD NOT DO)."
+                ),
+            })
         response = _call_with_retry(
             client, use_model, messages, tools, turn,
             thinking=use_thinking, reasoning_effort=use_effort,

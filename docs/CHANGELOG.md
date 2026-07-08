@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.3 — 2026-07-07
+
+Post-mortem fixes after a project-wide consistency audit was mis-routed to the
+worker and died at the 50-turn cap with zero output (reasoning-shaped task,
+one over-stuffed delegation, end-of-run-only write).
+
+- Worker system prompt now states the hard `max_turns` budget and requires
+  incremental output: create the output file early and update it after each
+  file/item, never one final write.
+- The agent loop injects a `[turn budget warning]` user message when ~10% of
+  turns remain (floor 2, never on the first turn), telling the worker to flush
+  unsaved results and summarize before the cap kills the loop.
+- `glm-worker` skill: audits / code reviews / consistency checks / bug hunts /
+  multi-category analysis are now an explicit do-not-delegate category with no
+  "only worker left" pressure valve; new shard-sizing guidance (aim well under
+  ~40 turns, ≈≤10 files per shard, fan out in parallel) and a mandatory
+  incremental-output line in every task that produces an output file.
+- `glm` proxy agent: new task-shape gate — refuses audit/review/analysis tasks
+  with `REFUSED: reasoning-shaped task` instead of forwarding them; appends the
+  incremental-write instruction to forwarded tasks that lack one.
+- README auto-routing block gains the same never-route-audits and
+  shard/incremental-output rules.
+
 ## 0.1.2 — 2026-07-03
 
 Production-hardening pass: 11 fixes from a full pre-release audit.

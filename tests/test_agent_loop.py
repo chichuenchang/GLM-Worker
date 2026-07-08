@@ -131,7 +131,11 @@ class _FakeCompletions:
         self.calls = []
 
     def create(self, **kwargs):
-        self.calls.append(kwargs)
+        # run_agent mutates the same messages list across turns; snapshot it so
+        # each recorded call reflects what was actually sent on that turn.
+        snap = dict(kwargs)
+        snap["messages"] = list(kwargs["messages"])
+        self.calls.append(snap)
         return self._responses.pop(0)
 
 
@@ -255,3 +259,60 @@ def test_run_agent_hits_max_turns(tmp_path):
     result = run_agent("loop", cfg, client=_FakeClient([always_tool() for _ in range(3)]))
     assert result["status"] == "max_turns"
     assert result["metrics"]["turns_used"] == 3
+
+
+def _always_tool():
+    tc = _FakeToolCall("c", "Read", json.dumps({"path": "x"}))
+    return _FakeResponse(
+        _FakeMessage(content="thinking", tool_calls=[tc]),
+        {"role": "assistant", "content": "thinking", "tool_calls": [{"id": "c", "type": "function",
+         "function": {"name": "Read", "arguments": json.dumps({"path": "x"})}}]},
+    )
+
+
+def _warning_messages(client):
+    return [
+        m
+        for kw in client.completions.calls
+        for m in kw["messages"]
+        if m.get("role") == "user" and "[turn budget warning]" in str(m.get("content", ""))
+    ]
+
+
+def test_system_prompt_states_budget_and_incremental_rule(tmp_path):
+    client = _FakeClient([_done_response()])
+    run_agent("x", _cfg(tmp_path), client=client)
+    system = client.completions.calls[0]["messages"][0]["content"]
+    assert "10 conversation turns" in system  # _cfg uses max_turns=10
+    assert "incrementally" in system
+
+
+def test_turn_warning_injected_near_cap(tmp_path):
+    # max_turns=10 -> warn when max(2, 10 // 10) = 2 turns remain, i.e. turn 8.
+    cfg = Config(api_key="sk-x", workspace=tmp_path, max_turns=10)
+    client = _FakeClient([_always_tool() for _ in range(10)])
+    result = run_agent("loop", cfg, client=client)
+    assert result["status"] == "max_turns"
+    warnings = _warning_messages(client)
+    assert warnings, "expected a turn budget warning near the cap"
+    assert "Only 2 turns remain" in warnings[0]["content"]
+    # Injected before the turn-8 call, absent from the turn-7 call.
+    assert not any(
+        "[turn budget warning]" in str(m.get("content", ""))
+        for m in client.completions.calls[7]["messages"]
+    )
+
+
+def test_turn_warning_absent_when_done_early(tmp_path):
+    client = _FakeClient([_done_response()])
+    run_agent("x", _cfg(tmp_path), client=client)
+    assert _warning_messages(client) == []
+
+
+def test_turn_warning_never_preempts_first_turn(tmp_path):
+    # max_turns=2 -> threshold 2 only matches at turn 0, which is skipped:
+    # warning a worker before it has done anything would waste the whole budget.
+    cfg = Config(api_key="sk-x", workspace=tmp_path, max_turns=2)
+    client = _FakeClient([_always_tool() for _ in range(2)])
+    run_agent("loop", cfg, client=client)
+    assert _warning_messages(client) == []
